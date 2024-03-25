@@ -11,6 +11,7 @@ from electrum import descriptor
 from electrum.bip32 import BIP32Node, convert_bip32_intpath_to_strpath, normalize_bip32_derivation
 from electrum.bitcoin import EncodeBase58Check, int_to_hex, is_b58_address, is_segwit_script_type, var_int
 from electrum.crypto import hash_160
+from electrum.commands import format_satoshis
 from electrum.i18n import _
 from electrum.keystore import Hardware_KeyStore
 from electrum.logging import get_logger
@@ -612,6 +613,8 @@ class Ledger_Client_Legacy(Ledger_Client):
             txOutput += script
         txOutput = bfh(txOutput)
 
+        outputAmount = 0
+        outputAddress = ""
         if not self.supports_multi_output():
             if len(tx.outputs()) > 2:
                 self.give_error("Transaction with more than 2 outputs not supported")
@@ -623,6 +626,12 @@ class Ledger_Client_Legacy(Ledger_Client):
                     self.give_error(_("Only address outputs are supported by {}").format(keystore.device))
                 # note: max_size based on https://github.com/LedgerHQ/ledger-app-btc/commit/3a78dee9c0484821df58975803e40d58fbfc2c38#diff-c61ccd96a6d8b54d48f54a3bc4dfa7e2R26
                 validate_op_return_output(txout, max_size=190)
+            if txout.is_change:
+                change_path = txout.bip32_paths
+                print("change path: ", change_path)
+            else:
+                outputAmount = txout.value
+                outputAddress = txout.address
 
         # Output "change" detection
         # - only one output and one change is authorized (for hw.1 and nano)
@@ -712,7 +721,7 @@ class Ledger_Client_Legacy(Ledger_Client):
                     self.dongleObject.startUntrustedTransaction(firstTransaction, inputIndex, chipInputs, redeemScripts[inputIndex], version=tx.version)
                     # we don't set meaningful outputAddress, amount and fees
                     # as we only care about the alternateEncoding==True branch
-                    outputData = self.dongleObject.finalizeInput(b'', 0, 0, changePath, bfh(rawTx))
+                    outputData = self.dongleObject.finalizeInput(outputAddress.encode(), format_satoshis(outputAmount), format_satoshis(tx.get_fee()), changePath)
                     outputData['outputData'] = txOutput
                     if outputData['confirmationNeeded']:
                         outputData['address'] = output
@@ -826,7 +835,7 @@ class Ledger_Client_Legacy_HW1(Ledger_Client_Legacy):
         dev = hid.device()
         dev.open_path(device.path)
         dev.set_nonblocking(True)
-        hid_device = HIDDongleHIDAPI(dev, ledger, debug=False)
+        hid_device = HIDDongleHIDAPI(dev, ledger, debug=True)
         self.dongleObject = btchip(hid_device)
 
         self._preflightDone = False
